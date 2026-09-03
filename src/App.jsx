@@ -84,6 +84,67 @@ function checkIsLate(isoString) {
   return { isLate: false, minutesLate: 0 }
 }
 
+function formatDelayBadge(totalMinutes) {
+  if (!totalMinutes || totalMinutes <= 0) return ''
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  if (hours > 0 && mins > 0) return `+${hours}s ${mins}m`
+  if (hours > 0) return `+${hours}s`
+  return `+${mins}m`
+}
+
+function formatDelayTitle(totalMinutes) {
+  if (!totalMinutes || totalMinutes <= 0) return ''
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  if (hours > 0 && mins > 0) return `Ishga ${hours} soat ${mins} daqiqa kechikib keldi`
+  if (hours > 0) return `Ishga ${hours} soat kechikib keldi`
+  return `Ishga ${mins} daqiqa kechikib keldi`
+}
+
+function checkIsEarlyLeave(isoString) {
+  if (!isoString) return { isEarly: false, minutesEarly: 0 }
+  const s = loadSettings()
+  if (!s.workEndTime) return { isEarly: false, minutesEarly: 0 }
+
+  const dt = new Date(isoString)
+  const timeStr = dt.toLocaleTimeString('uz-UZ', {
+    timeZone: 'Asia/Tashkent',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  })
+
+  const [h, m] = timeStr.split(':').map(Number)
+  const actualMinutes = h * 60 + m
+
+  const [eh, em] = s.workEndTime.split(':').map(Number)
+  const scheduledEndTimeMinutes = eh * 60 + em
+
+  const diff = scheduledEndTimeMinutes - actualMinutes
+
+  if (diff > 0) {
+    return { isEarly: true, minutesEarly: diff }
+  }
+  return { isEarly: false, minutesEarly: 0 }
+}
+
+function formatEarlyBadge(totalMinutes) {
+  if (!totalMinutes || totalMinutes <= 0) return ''
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  if (hours > 0 && mins > 0) return `-${hours}s ${mins}m`
+  if (hours > 0) return `-${hours}s`
+  return `-${mins}m`
+}
+
+function formatEarlyTitle(totalMinutes) {
+  if (!totalMinutes || totalMinutes <= 0) return ''
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  if (hours > 0 && mins > 0) return `Ishdan ${hours} soat ${mins} daqiqa vaqtliroq ketdi`
+  if (hours > 0) return `Ishdan ${hours} soat vaqtliroq ketdi`
+  return `Ishdan ${mins} daqiqa vaqtliroq ketdi`
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 function formatTime(isoString) {
   if (!isoString) return '—'
@@ -970,10 +1031,10 @@ function EventRow({ group, index, onPhotoClick }) {
               <span
                 className="badge checkout"
                 style={{ padding: '3px 8px', fontSize: 12, background: 'rgba(239, 68, 68, 0.18)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}
-                title={`Ishga ${minutesLate} daqiqa kechikib keldi`}
+                title={formatDelayTitle(minutesLate)}
               >
                 <i className="bi bi-exclamation-circle-fill" /> {formatOnlyTime(group.firstCheckIn)}
-                <span style={{ fontSize: 10, marginLeft: 4, fontWeight: 700 }}>+{minutesLate}m</span>
+                <span style={{ fontSize: 10, marginLeft: 4, fontWeight: 700 }}>{formatDelayBadge(minutesLate)}</span>
               </span>
             )
           }
@@ -1047,13 +1108,29 @@ function EventRow({ group, index, onPhotoClick }) {
 
       {/* Chiqish */}
       <div className="td">
-        {group.lastCheckOut ? (
-          <span className="badge checkout" style={{ padding: '3px 8px', fontSize: 12 }}>
-            <i className="bi bi-box-arrow-left" /> {formatOnlyTime(group.lastCheckOut)}
-          </span>
-        ) : (
-          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
-        )}
+        {(() => {
+          if (!group.lastCheckOut) return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
+          const { isEarly, minutesEarly } = checkIsEarlyLeave(group.lastCheckOut)
+
+          if (isEarly) {
+            return (
+              <span
+                className="badge checkout"
+                style={{ padding: '3px 8px', fontSize: 12, background: 'rgba(239, 68, 68, 0.18)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                title={formatEarlyTitle(minutesEarly)}
+              >
+                <i className="bi bi-exclamation-circle-fill" /> {formatOnlyTime(group.lastCheckOut)}
+                <span style={{ fontSize: 10, marginLeft: 4, fontWeight: 700 }}>{formatEarlyBadge(minutesEarly)}</span>
+              </span>
+            )
+          }
+
+          return (
+            <span className="badge checkout" style={{ padding: '3px 8px', fontSize: 12 }}>
+              <i className="bi bi-box-arrow-left" /> {formatOnlyTime(group.lastCheckOut)}
+            </span>
+          )
+        })()}
       </div>
 
       {/* Kun davomidagi boshqa harakatlar (tushliksiz) */}
@@ -1925,7 +2002,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('events') // 'events' | 'users'
   const [startTime, setStartTime] = useState(getTodayStartISO)
   const [endTime, setEndTime] = useState(getTodayEndISO)
-  const [maxResults, setMaxResults] = useState(30)
+  const [maxResults, setMaxResults] = useState(50)
   const [searchPos, setSearchPos] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
   const [showSettings, setShowSettings] = useState(false)
@@ -1993,8 +2070,10 @@ export default function App() {
 
   const groupedList = groupEventsByUserAndDate(infoList)
 
-  // Kechikkanlar sonini hisoblash
-  const lateCount = groupedList.filter(g => checkIsLate(g.firstCheckIn).isLate).length
+  // Kechikkanlar, vaqtida kelganlar va ertaroq ketganlar sonini hisoblash
+  const lateCount = groupedList.filter(g => g.firstCheckIn && checkIsLate(g.firstCheckIn).isLate).length
+  const onTimeCount = groupedList.filter(g => g.firstCheckIn && !checkIsLate(g.firstCheckIn).isLate).length
+  const earlyLeaveCount = groupedList.filter(g => g.lastCheckOut && checkIsEarlyLeave(g.lastCheckOut).isEarly).length
 
   const filteredGrouped = groupedList.filter(group => {
     if (!searchQuery) return true
@@ -2124,15 +2203,29 @@ export default function App() {
                 </div>
               )}
 
-              {/* ── Single Stat Card (Kechikkanlar) ── */}
+              {/* ── Stat Cards (Kechikkanlar, Vaqtida kelganlar va Ertaroq ketganlar) ── */}
               {data && !loading && (
-                <div className="stats-row" style={{ gridTemplateColumns: '1fr', maxWidth: 320 }}>
+                <div className="stats-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', maxWidth: 960 }}>
                   <StatCard
                     icon="bi-exclamation-triangle-fill"
                     value={lateCount}
                     label="Kechikkanlar soni"
                     colorClass="red"
                     delay={0}
+                  />
+                  <StatCard
+                    icon="bi-check-circle-fill"
+                    value={onTimeCount}
+                    label="Vaqtida kelganlar soni"
+                    colorClass="green"
+                    delay={50}
+                  />
+                  <StatCard
+                    icon="bi-person-dash-fill"
+                    value={earlyLeaveCount}
+                    label="Ertaroq ketganlar soni"
+                    colorClass="red"
+                    delay={100}
                   />
                 </div>
               )}

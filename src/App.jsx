@@ -311,6 +311,16 @@ function Sidebar({ activeTab, setActiveTab }) {
           </span>
           Foydalanuvchilar
         </div>
+
+        <div
+          className={`sidebar-item ${activeTab === 'monthly' ? 'active' : ''}`}
+          onClick={() => setActiveTab('monthly')}
+        >
+          <span className="sidebar-icon">
+            <i className="bi bi-calendar-check" />
+          </span>
+          Oylik Hisobot
+        </div>
       </nav>
     </aside>
   )
@@ -1711,29 +1721,54 @@ function UsersView({ onPhotoClick }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/users/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
-        body: JSON.stringify({ maxResults: Number(maxResults) }),
-      })
+      let allUsers = []
+      let searchPos = 0
+      let total = 0
+      let lastResultJson = null
 
-      if (!res.ok) {
-        let detail = ''
-        try {
-          const errJson = await res.json()
-          detail = errJson?.error || JSON.stringify(errJson)
-        } catch (_) { }
-        throw new Error(`Server xatosi ${res.status}: ${detail || res.statusText}`)
+      do {
+        const res = await fetch('/api/users/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
+          body: JSON.stringify({ searchResultPosition: searchPos, maxResults: 100 }),
+        })
+
+        if (!res.ok) {
+          let detail = ''
+          try {
+            const errJson = await res.json()
+            detail = errJson?.error || JSON.stringify(errJson)
+          } catch (_) { }
+          throw new Error(`Server xatosi ${res.status}: ${detail || res.statusText}`)
+        }
+
+        const json = await res.json()
+        lastResultJson = json
+        const infoSearch = json?.UserInfoSearch ?? {}
+        const pageUsers = infoSearch.UserInfo ?? []
+        total = infoSearch.totalMatches ?? total
+
+        if (pageUsers.length === 0) break
+
+        allUsers = [...allUsers, ...pageUsers]
+        searchPos = allUsers.length
+      } while (allUsers.length < total)
+
+      if (lastResultJson) {
+        setUsersData({
+          UserInfoSearch: {
+            ...lastResultJson.UserInfoSearch,
+            UserInfo: allUsers,
+            totalMatches: total || allUsers.length,
+          }
+        })
       }
-
-      const json = await res.json()
-      setUsersData(json)
     } catch (err) {
       setError(err.message || 'Noma\'lum xato')
     } finally {
       setLoading(false)
     }
-  }, [maxResults])
+  }, [])
 
   // Initial load
   useState(() => {
@@ -1997,6 +2032,504 @@ function UsersView({ onPhotoClick }) {
   )
 }
 
+// ── MonthlyReportView ──────────────────────────────────────────────
+function MonthlyReportView() {
+  const [users, setUsers] = useState([])
+  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [loadingEvents, setLoadingEvents] = useState(false)
+  const [userSearch, setUserSearch] = useState('')
+  const [currentDate, setCurrentDate] = useState(new Date())
+  const [events, setEvents] = useState([])
+
+  const MONTH_NAMES = [
+    'Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun',
+    'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr'
+  ]
+
+  const WEEKDAYS_SHORT = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan']
+
+  // 1. Fetch All Users
+  const fetchUsers = useCallback(async () => {
+    setLoadingUsers(true)
+    try {
+      let allUsers = []
+      let searchPos = 0
+      let total = 0
+
+      do {
+        const res = await fetch('/api/users/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
+          body: JSON.stringify({ searchResultPosition: searchPos, maxResults: 100 }),
+        })
+        if (res.ok) {
+          const json = await res.json()
+          const infoSearch = json?.UserInfoSearch ?? {}
+          const pageUsers = infoSearch.UserInfo ?? []
+          total = infoSearch.totalMatches ?? total
+
+          if (pageUsers.length === 0) break
+
+          allUsers = [...allUsers, ...pageUsers]
+          searchPos = allUsers.length
+        } else {
+          break
+        }
+      } while (allUsers.length < total)
+
+      setUsers(allUsers)
+    } catch (err) {
+      console.error('User fetch error:', err)
+    } finally {
+      setLoadingUsers(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchUsers()
+  }, [fetchUsers])
+
+  // 2. Fetch Events for the selected month
+  const year = currentDate.getFullYear()
+  const month = currentDate.getMonth()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+  const fetchMonthlyEvents = useCallback(async () => {
+    setLoadingEvents(true)
+    const mStr = String(month + 1).padStart(2, '0')
+    const lastDayStr = String(daysInMonth).padStart(2, '0')
+    const startTime = `${year}-${mStr}-01T00:00:00+05:00`
+    const endTime = `${year}-${mStr}-${lastDayStr}T23:59:59+05:00`
+
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
+        body: JSON.stringify({
+          startTime,
+          endTime,
+          maxResults: 1000,
+        }),
+      })
+
+      if (res.ok) {
+        const json = await res.json()
+        const infoList = json?.AcsEvent?.InfoList ?? []
+        setEvents(infoList)
+      } else {
+        setEvents([])
+      }
+    } catch (err) {
+      console.error('Monthly events fetch error:', err)
+      setEvents([])
+    } finally {
+      setLoadingEvents(false)
+    }
+  }, [year, month, daysInMonth])
+
+  useEffect(() => {
+    fetchMonthlyEvents()
+  }, [fetchMonthlyEvents])
+
+  // Navigation handlers
+  const handlePrevMonth = () => setCurrentDate(new Date(year, month - 1, 1))
+  const handleNextMonth = () => setCurrentDate(new Date(year, month + 1, 1))
+  const handleTodayMonth = () => setCurrentDate(new Date())
+
+  // Excel Export Handler (Formatted HTML XML Spreadsheet)
+  const handleExportExcel = () => {
+    const monthName = MONTH_NAMES[month]
+    const todayDate = new Date()
+
+    let excelHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Oylik Hisobot ${monthName}</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          table { border-collapse: collapse; width: 100%; font-family: Calibri, Arial, sans-serif; font-size: 10pt; }
+          th { background-color: #0f172a; color: #ffffff; font-weight: bold; text-align: center; border: 1px solid #334155; padding: 8px; vertical-align: middle; }
+          td { border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; padding: 5px; }
+          .td-user { text-align: left; font-weight: bold; background-color: #f8fafc; mso-number-format:"\\@"; }
+          .status-normal { background-color: #dcfce7; color: #15803d; font-weight: bold; }
+          .status-defect { background-color: #fee2e2; color: #dc2626; font-weight: bold; }
+          .status-off { background-color: #f1f5f9; color: #64748b; }
+          .status-future { color: #94a3b8; }
+          .summary-col { font-weight: bold; background-color: #f8fafc; }
+        </style>
+      </head>
+      <body>
+        <h3 style="font-family: Arial; color: #0f172a;">Oylik Hisobot: ${monthName} ${year}</h3>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px;">№</th>
+              <th style="width: 100px;">Xodim kodi</th>
+              <th style="width: 180px;">Xodim Ismi</th>
+    `
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dayDate = new Date(year, month, d)
+      const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6
+      excelHtml += `<th style="${isWeekend ? 'background-color: #1e293b; color: #f59e0b;' : ''}">${d}-${monthName}</th>`
+    }
+
+    excelHtml += `
+              <th style="width: 110px; background-color: #166534;">Normal kunlar</th>
+              <th style="width: 110px; background-color: #991b1b;">Kamchiliklar</th>
+            </tr>
+          </thead>
+          <tbody>
+    `
+
+    filteredUsers.forEach((user, index) => {
+      let normalCount = 0
+      let defectCount = 0
+      let rowHtml = `
+        <tr>
+          <td>${index + 1}</td>
+          <td style="mso-number-format:'\\@';">#${user.employeeNo}</td>
+          <td class="td-user">${user.name || 'Ismsiz'}</td>
+      `
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        const dayDate = new Date(year, month, d)
+        const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6
+        const isFuture = dayDate > todayDate && (dayDate.toDateString() !== todayDate.toDateString())
+
+        const userEvents = events.filter(e => {
+          const matchUser = String(e.employeeNoString) === String(user.employeeNo) ||
+            (e.name && user.name && e.name.toLowerCase() === user.name.toLowerCase())
+          return matchUser && (e.time || '').startsWith(dayStr)
+        })
+
+        userEvents.sort((a, b) => new Date(a.time) - new Date(b.time))
+        const firstCheckIn = userEvents.find(e => e.attendanceStatus === 'checkIn')?.time || userEvents[0]?.time
+        const lastCheckOut = [...userEvents].reverse().find(e => e.attendanceStatus === 'checkOut')?.time || (userEvents.length > 1 ? userEvents[userEvents.length - 1]?.time : null)
+
+        const lateInfo = checkIsLate(firstCheckIn)
+        const earlyInfo = checkIsEarlyLeave(lastCheckOut)
+
+        if (isFuture) {
+          rowHtml += `<td class="status-future">—</td>`
+        } else if (isWeekend && userEvents.length === 0) {
+          rowHtml += `<td class="status-off">Dam olish</td>`
+        } else if (!firstCheckIn) {
+          defectCount++
+          rowHtml += `<td class="status-defect">Kelmagan</td>`
+        } else if (lateInfo.isLate || earlyInfo.isEarly) {
+          defectCount++
+          let note = []
+          if (lateInfo.isLate) note.push(`Kechikdi (${formatDelayBadge(lateInfo.minutesLate)})`)
+          if (earlyInfo.isEarly) note.push(`Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})`)
+          rowHtml += `<td class="status-defect">${note.join(', ')}</td>`
+        } else {
+          normalCount++
+          const tIn = new Date(firstCheckIn).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', hour12: false })
+          rowHtml += `<td class="status-normal">Normal (${tIn})</td>`
+        }
+      }
+
+      rowHtml += `
+          <td class="summary-col" style="color: #15803d;">${normalCount}</td>
+          <td class="summary-col" style="color: #dc2626;">${defectCount}</td>
+        </tr>
+      `
+      excelHtml += rowHtml
+    })
+
+    excelHtml += `
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `
+
+    const blob = new Blob(['\uFEFF' + excelHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.setAttribute('href', url)
+    link.setAttribute('download', `Oylik_Hisobot_${monthName}_${year}.xls`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  // Filter Users
+  const filteredUsers = users.filter(u => {
+    if (!userSearch) return true
+    const q = userSearch.toLowerCase()
+    return (
+      (u.name || '').toLowerCase().includes(q) ||
+      (u.employeeNo || '').includes(q)
+    )
+  })
+
+  const today = new Date()
+
+  // Generate days list 1..daysInMonth
+  const daysList = Array.from({ length: daysInMonth }, (_, i) => {
+    const d = i + 1
+    const dayDate = new Date(year, month, d)
+    const dayOfWeek = dayDate.getDay() // 0=Sun, 6=Sat
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+    const isFuture = dayDate > today && (dayDate.toDateString() !== today.toDateString())
+    const weekdayName = WEEKDAYS_SHORT[dayOfWeek]
+    return { dayNumber: d, dayDate, dayOfWeek, isWeekend, isFuture, weekdayName }
+  })
+
+  return (
+    <div className="monthly-matrix-wrapper">
+      {/* Top Controls Bar */}
+      <div className="monthly-matrix-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div className="monthly-nav-controls">
+            <button
+              className="btn btn-ghost"
+              onClick={handlePrevMonth}
+              title="Oldingi oy"
+              style={{ padding: '6px 12px' }}
+            >
+              <i className="bi bi-chevron-left" />
+            </button>
+            <div className="monthly-month-title">
+              {MONTH_NAMES[month]} {year}
+            </div>
+            <button
+              className="btn btn-ghost"
+              onClick={handleNextMonth}
+              title="Keyingi oy"
+              style={{ padding: '6px 12px' }}
+            >
+              <i className="bi bi-chevron-right" />
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={handleTodayMonth}
+              title="Shu oy"
+              style={{ padding: '6px 12px', fontSize: 12, marginLeft: 6 }}
+            >
+              <i className="bi bi-calendar-event" style={{ marginRight: 4 }} />
+              Shu oy
+            </button>
+          </div>
+
+          {/* User Search Input */}
+          <div className="form-group" style={{ marginBottom: 0, minWidth: 200 }}>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Xodimni qidirish..."
+              value={userSearch}
+              onChange={e => setUserSearch(e.target.value)}
+              style={{ fontSize: 13, padding: '6px 12px' }}
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div className="monthly-legend">
+            <div className="legend-item">
+              <div className="legend-box normal" />
+              <span>Normal</span>
+            </div>
+            <div className="legend-item">
+              <div className="legend-box defect" />
+              <span>Kamchilik</span>
+            </div>
+            <div className="legend-item">
+              <div className="legend-box off" />
+              <span>Dam olish / Yo'q</span>
+            </div>
+          </div>
+
+          {/* Excel Export Button */}
+          <button
+            className="btn btn-primary"
+            onClick={handleExportExcel}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+            title="Barcha xodimlarning oylik hisobotini Excel formatida yuklab olish"
+          >
+            <i className="bi bi-file-earmark-excel-fill" style={{ color: '#22c55e', fontSize: 15 }} />
+            Excelga yuklab olish
+          </button>
+        </div>
+      </div>
+
+      {/* Main Table Matrix (All users horizontal scroll) */}
+      <div className="monthly-matrix-scroll">
+        <table className="monthly-matrix-table">
+          <thead>
+            <tr>
+              <th className="matrix-th matrix-th-user">
+                Xodimlar ({filteredUsers.length}) {loadingEvents ? '⌛' : ''}
+              </th>
+              {daysList.map(d => (
+                <th key={d.dayNumber} className="matrix-th" style={{ color: d.isWeekend ? '#f59e0b' : 'inherit' }}>
+                  <div>{d.dayNumber}</div>
+                  <div style={{ fontSize: 9, opacity: 0.7, textTransform: 'uppercase' }}>{d.weekdayName}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loadingUsers ? (
+              <tr>
+                <td colSpan={daysInMonth + 1} style={{ textAlign: 'center', padding: 30, color: 'var(--text-secondary)' }}>
+                  Xodimlar ro'yxati yuklanmoqda...
+                </td>
+              </tr>
+            ) : filteredUsers.length === 0 ? (
+              <tr>
+                <td colSpan={daysInMonth + 1} style={{ textAlign: 'center', padding: 30, color: 'var(--text-secondary)' }}>
+                  Xodimlar topilmadi
+                </td>
+              </tr>
+            ) : (
+              filteredUsers.map(user => {
+                const initialLetter = (user.name || 'U').charAt(0).toUpperCase()
+
+                return (
+                  <tr key={user.employeeNo}>
+                    {/* Sticky User Cell */}
+                    <td className="matrix-td-user">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div className="monthly-user-avatar" style={{ width: 28, height: 28, fontSize: 12 }}>
+                          {initialLetter}
+                        </div>
+                        <div className="monthly-user-info">
+                          <div className="monthly-user-name" style={{ fontSize: 12 }}>
+                            {user.name || 'Ismsiz'}
+                          </div>
+                          <div className="monthly-user-id" style={{ fontSize: 10 }}>
+                            #{user.employeeNo}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Days Cells (1..daysInMonth) */}
+                    {daysList.map(d => {
+                      const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d.dayNumber).padStart(2, '0')}`
+
+                      const userEventsOnDay = events.filter(e => {
+                        const matchUser =
+                          String(e.employeeNoString) === String(user.employeeNo) ||
+                          (e.name && user.name && e.name.toLowerCase() === user.name.toLowerCase())
+                        if (!matchUser) return false
+                        return (e.time || '').startsWith(dayStr)
+                      })
+
+                      userEventsOnDay.sort((a, b) => new Date(a.time) - new Date(b.time))
+
+                      const checkIns = userEventsOnDay.filter(e => e.attendanceStatus === 'checkIn')
+                      const checkOuts = userEventsOnDay.filter(e => e.attendanceStatus === 'checkOut')
+
+                      const firstCheckIn = checkIns[0]?.time || userEventsOnDay[0]?.time || null
+                      const lastCheckOut = checkOuts[checkOuts.length - 1]?.time || (userEventsOnDay.length > 1 ? userEventsOnDay[userEventsOnDay.length - 1]?.time : null)
+
+                      const lateInfo = checkIsLate(firstCheckIn)
+                      const earlyInfo = checkIsEarlyLeave(lastCheckOut)
+
+                      let status = 'normal'
+                      let statusTag = 'OK'
+
+                      if (d.isFuture) {
+                        status = 'future'
+                        statusTag = '—'
+                      } else if (d.isWeekend && userEventsOnDay.length === 0) {
+                        status = 'off'
+                        statusTag = 'D'
+                      } else if (!firstCheckIn) {
+                        status = 'defect'
+                        statusTag = 'X'
+                      } else if (lateInfo.isLate || earlyInfo.isEarly) {
+                        status = 'defect'
+                        statusTag = lateInfo.isLate ? formatDelayBadge(lateInfo.minutesLate) : formatEarlyBadge(earlyInfo.minutesEarly)
+                      } else {
+                        status = 'normal'
+                        statusTag = 'OK'
+                      }
+
+                      const timeStr = firstCheckIn
+                        ? new Date(firstCheckIn).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', hour12: false })
+                        : null
+                      const outTimeStr = lastCheckOut
+                        ? new Date(lastCheckOut).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', hour12: false })
+                        : null
+
+                      return (
+                        <td key={d.dayNumber} className="matrix-td-day">
+                          <div className={`matrix-day-box ${status}`}>
+                            <div>{statusTag}</div>
+
+                            {/* Tooltip on Hover */}
+                            <div className="day-tooltip">
+                              <div className="tooltip-title">
+                                {user.name || 'Ismsiz'} • {d.dayNumber}-{MONTH_NAMES[month]}
+                              </div>
+
+                              <div className="tooltip-row">
+                                <span>Status:</span>
+                                <span className={status === 'normal' ? 'tooltip-row ok' : status === 'defect' ? 'tooltip-row late' : ''}>
+                                  {status === 'normal' ? 'Vaqtida' : status === 'defect' ? 'Kamchilik' : status === 'off' ? 'Dam olish' : 'Kelajak'}
+                                </span>
+                              </div>
+
+                              <div className="tooltip-row">
+                                <span>Kirish vaqti:</span>
+                                <span>{timeStr ? timeStr : 'Qayd etilmagan'}</span>
+                              </div>
+
+                              <div className="tooltip-row">
+                                <span>Chiqish vaqti:</span>
+                                <span>{outTimeStr ? outTimeStr : 'Qayd etilmagan'}</span>
+                              </div>
+
+                              {lateInfo?.isLate && (
+                                <div className="tooltip-row late">
+                                  <span>Kechikish:</span>
+                                  <span>{formatDelayTitle(lateInfo.minutesLate)}</span>
+                                </div>
+                              )}
+
+                              {earlyInfo?.isEarly && (
+                                <div className="tooltip-row early">
+                                  <span>Erta ketish:</span>
+                                  <span>{formatEarlyTitle(earlyInfo.minutesEarly)}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ── Main App ───────────────────────────────────────────────────────
 export default function App() {
   const [activeTab, setActiveTab] = useState('events') // 'events' | 'users'
@@ -2112,6 +2645,8 @@ export default function App() {
 
           {activeTab === 'users' ? (
             <UsersView onPhotoClick={(url, name) => { setModalUrl(url); setModalName(name) }} />
+          ) : activeTab === 'monthly' ? (
+            <MonthlyReportView />
           ) : (
             <>
               {/* ── Filter Panel ── */}

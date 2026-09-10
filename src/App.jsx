@@ -2144,6 +2144,7 @@ function MonthlyReportView() {
   const handleExportExcel = () => {
     const monthName = MONTH_NAMES[month]
     const todayDate = new Date()
+    const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
 
     let excelHtml = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
@@ -2214,7 +2215,9 @@ function MonthlyReportView() {
         const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
         const dayDate = new Date(year, month, d)
         const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6
-        const isFuture = dayDate > todayDate && (dayDate.toDateString() !== todayDate.toDateString())
+        const isToday = dayStr === todayStr
+        const todayMidnight = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate())
+        const isFuture = dayDate > todayMidnight
 
         const userEvents = events.filter(e => {
           const matchUser = String(e.employeeNoString) === String(user.employeeNo) ||
@@ -2223,25 +2226,47 @@ function MonthlyReportView() {
         })
 
         userEvents.sort((a, b) => new Date(a.time) - new Date(b.time))
-        const firstCheckIn = userEvents.find(e => e.attendanceStatus === 'checkIn')?.time || userEvents[0]?.time
-        const lastCheckOut = [...userEvents].reverse().find(e => e.attendanceStatus === 'checkOut')?.time || (userEvents.length > 1 ? userEvents[userEvents.length - 1]?.time : null)
+        const checkIns = userEvents.filter(e => e.attendanceStatus === 'checkIn')
+        const checkOuts = userEvents.filter(e => e.attendanceStatus === 'checkOut')
+
+        const firstCheckIn = checkIns[0]?.time || userEvents[0]?.time || null
+
+        let lastCheckOut = null
+        if (checkOuts.length > 0) {
+          lastCheckOut = checkOuts[checkOuts.length - 1].time
+        } else if (userEvents.length > 1) {
+          const lastEv = userEvents[userEvents.length - 1]
+          if (lastEv.time !== firstCheckIn) {
+            lastCheckOut = lastEv.time
+          }
+        }
 
         const lateInfo = checkIsLate(firstCheckIn)
         const earlyInfo = checkIsEarlyLeave(lastCheckOut)
 
         if (isFuture) {
           rowHtml += `<td class="status-future">—</td>`
-        } else if (isWeekend && userEvents.length === 0) {
-          rowHtml += `<td class="status-off">Dam olish</td>`
         } else if (!firstCheckIn) {
+          if (isToday) {
+            rowHtml += `<td class="status-future">—</td>`
+          } else if (isWeekend && userEvents.length === 0) {
+            rowHtml += `<td class="status-off">Dam olish</td>`
+          } else {
+            defectCount++
+            rowHtml += `<td class="status-absent">Kelmagan</td>`
+          }
+        } else if (lateInfo.isLate) {
           defectCount++
-          rowHtml += `<td class="status-absent">Kelmagan</td>`
-        } else if (lateInfo.isLate || earlyInfo.isEarly) {
-          defectCount++
-          let note = []
-          if (lateInfo.isLate) note.push(`Kechikdi (${formatDelayBadge(lateInfo.minutesLate)})`)
-          if (earlyInfo.isEarly) note.push(`Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})`)
+          let note = [`Kechikdi (${formatDelayBadge(lateInfo.minutesLate)})`]
+          if (lastCheckOut && earlyInfo.isEarly) note.push(`Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})`)
           rowHtml += `<td class="status-late">${note.join(', ')}</td>`
+        } else if (!lastCheckOut) {
+          normalCount++
+          const tIn = new Date(firstCheckIn).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', hour12: false })
+          rowHtml += `<td class="status-normal" style="background-color: #e0f2fe; color: #0284c7; font-weight: bold;">Kelgan (${tIn})</td>`
+        } else if (earlyInfo.isEarly) {
+          defectCount++
+          rowHtml += `<td class="status-late">Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})</td>`
         } else {
           normalCount++
           const tIn = new Date(firstCheckIn).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -2286,16 +2311,20 @@ function MonthlyReportView() {
   })
 
   const today = new Date()
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate())
 
   // Generate days list 1..daysInMonth
   const daysList = Array.from({ length: daysInMonth }, (_, i) => {
     const d = i + 1
     const dayDate = new Date(year, month, d)
+    const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     const dayOfWeek = dayDate.getDay() // 0=Sun, 6=Sat
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
-    const isFuture = dayDate > today && (dayDate.toDateString() !== today.toDateString())
+    const isToday = dayStr === todayStr
+    const isFuture = dayDate > todayMidnight
     const weekdayName = WEEKDAYS_SHORT[dayOfWeek]
-    return { dayNumber: d, dayDate, dayOfWeek, isWeekend, isFuture, weekdayName }
+    return { dayNumber: d, dayDate, dayStr, dayOfWeek, isWeekend, isToday, isFuture, weekdayName }
   })
 
   return (
@@ -2351,7 +2380,11 @@ function MonthlyReportView() {
           <div className="monthly-legend">
             <div className="legend-item">
               <div className="legend-box normal" />
-              <span>Vaqtida</span>
+              <span>Vaqtida (To'liq)</span>
+            </div>
+            <div className="legend-item">
+              <div className="legend-box half-normal" />
+              <span>Kelgan (Vaqtida)</span>
             </div>
             <div className="legend-item">
               <div className="legend-box late" />
@@ -2434,7 +2467,7 @@ function MonthlyReportView() {
 
                     {/* Days Cells (1..daysInMonth) */}
                     {daysList.map(d => {
-                      const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d.dayNumber).padStart(2, '0')}`
+                      const dayStr = d.dayStr
 
                       const userEventsOnDay = events.filter(e => {
                         const matchUser =
@@ -2450,15 +2483,20 @@ function MonthlyReportView() {
                       const checkOuts = userEventsOnDay.filter(e => e.attendanceStatus === 'checkOut')
 
                       const firstCheckIn = checkIns[0]?.time || userEventsOnDay[0]?.time || null
-                      const lastCheckOut = checkOuts[checkOuts.length - 1]?.time || (userEventsOnDay.length > 1 ? userEventsOnDay[userEventsOnDay.length - 1]?.time : null)
+
+                      let lastCheckOut = null
+                      if (checkOuts.length > 0) {
+                        lastCheckOut = checkOuts[checkOuts.length - 1].time
+                      } else if (userEventsOnDay.length > 1) {
+                        const lastEv = userEventsOnDay[userEventsOnDay.length - 1]
+                        if (lastEv.time !== firstCheckIn) {
+                          lastCheckOut = lastEv.time
+                        }
+                      }
 
                       const lateInfo = checkIsLate(firstCheckIn)
                       const earlyInfo = checkIsEarlyLeave(lastCheckOut)
 
-                      // Status mantiqini to'g'ri ajratamiz:
-                      // absent = kelmagan (red)
-                      // late = kech kelgan yoki erta ketgan (orange)
-                      // normal = vaqtida (green)
                       let status = 'normal'
                       let statusTag = 'OK'
                       let statusLabel = 'Vaqtida'
@@ -2467,28 +2505,47 @@ function MonthlyReportView() {
                         status = 'future'
                         statusTag = '—'
                         statusLabel = 'Kelajak'
-                      } else if (d.isWeekend && userEventsOnDay.length === 0) {
-                        status = 'off'
-                        statusTag = 'D'
-                        statusLabel = 'Dam olish'
                       } else if (!firstCheckIn) {
-                        // Kelmagan - RED
-                        status = 'absent'
-                        statusTag = 'X'
-                        statusLabel = 'Kelmagan'
-                      } else if (lateInfo.isLate || earlyInfo.isEarly) {
-                        // Kech kelgan yoki erta ketgan - ORANGE
+                        if (d.isToday) {
+                          // BUG FIX 1: Yangi kun (bugun) boshlanishi bilan hali chekin bo'lmagan bo'lsa default holatda turaversin!
+                          status = 'future'
+                          statusTag = '—'
+                          statusLabel = 'Bugun (Kutilmoqda)'
+                        } else if (d.isWeekend && userEventsOnDay.length === 0) {
+                          status = 'off'
+                          statusTag = 'D'
+                          statusLabel = 'Dam olish'
+                        } else {
+                          // Kelmagan - RED
+                          status = 'absent'
+                          statusTag = 'X'
+                          statusLabel = 'Kelmagan'
+                        }
+                      } else if (lateInfo.isLate) {
+                        // Kech kelgan - ORANGE
                         status = 'late'
-                        const parts = []
-                        if (lateInfo.isLate) parts.push(formatDelayBadge(lateInfo.minutesLate))
-                        if (earlyInfo.isEarly) parts.push(formatEarlyBadge(earlyInfo.minutesEarly))
+                        const parts = [formatDelayBadge(lateInfo.minutesLate)]
+                        if (lastCheckOut && earlyInfo.isEarly) {
+                          parts.push(formatEarlyBadge(earlyInfo.minutesEarly))
+                        }
                         statusTag = parts.join(' ')
                         statusLabel = [
-                          lateInfo.isLate ? `Kech kirdi (${formatDelayBadge(lateInfo.minutesLate)})` : '',
-                          earlyInfo.isEarly ? `Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})` : ''
+                          `Kech kirdi (${formatDelayBadge(lateInfo.minutesLate)})`,
+                          lastCheckOut && earlyInfo.isEarly ? `Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})` : ''
                         ].filter(Boolean).join(', ')
+                      } else if (!lastCheckOut) {
+                        // BUG FIX 2: Vaqtida kelgan, lekin hali checkout bo'lmagan (ertalab kelgan holat):
+                        // Katakcha 50% yashil + green border bo'lsin!
+                        status = 'half-normal'
+                        statusTag = 'OK'
+                        statusLabel = 'Kelgan (Vaqtida)'
+                      } else if (earlyInfo.isEarly) {
+                        // Vaqtida kelgan, lekin erta ketgan - ORANGE
+                        status = 'late'
+                        statusTag = formatEarlyBadge(earlyInfo.minutesEarly)
+                        statusLabel = `Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})`
                       } else {
-                        // Vaqtida - GREEN
+                        // Vaqtida kelgan VA vaqtida ketgan - TO'LIQ YASHIL (100%)
                         status = 'normal'
                         statusTag = 'OK'
                         statusLabel = 'Vaqtida'
@@ -2557,7 +2614,7 @@ function MonthlyReportView() {
           <div className="tooltip-row">
             <span>Holat:</span>
             <span className={
-              hoveredCell.data.status === 'normal' ? 'tok-ok' :
+              hoveredCell.data.status === 'normal' || hoveredCell.data.status === 'half-normal' ? 'tok-ok' :
               hoveredCell.data.status === 'late' ? 'tok-late' :
               hoveredCell.data.status === 'absent' ? 'tok-absent' : ''
             }>
@@ -2579,7 +2636,7 @@ function MonthlyReportView() {
 
           <div className="tooltip-row">
             <span>Chiqish:</span>
-            <span style={{ color: hoveredCell.data.earlyInfo?.isEarly ? '#fb923c' : '#94a3b8' }}>
+            <span style={{ color: hoveredCell.data.earlyInfo?.isEarly ? '#fb923c' : hoveredCell.data.outTimeStr ? '#4ade80' : '#94a3b8' }}>
               {hoveredCell.data.outTimeStr
                 ? hoveredCell.data.earlyInfo?.isEarly
                   ? `${hoveredCell.data.outTimeStr} (${formatEarlyBadge(hoveredCell.data.earlyInfo.minutesEarly)} erta)`

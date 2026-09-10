@@ -2041,6 +2041,10 @@ function MonthlyReportView() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [events, setEvents] = useState([])
 
+  // Fixed-position tooltip state (scroll containerdan tashqarida render bo'ladi)
+  const [hoveredCell, setHoveredCell] = useState(null)
+  // hoveredCell = { x, y, data: { userName, dayLabel, status, statusLabel, timeStr, outTimeStr, lateInfo, earlyInfo } }
+
   const MONTH_NAMES = [
     'Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun',
     'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr'
@@ -2165,7 +2169,8 @@ function MonthlyReportView() {
           td { border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; padding: 5px; }
           .td-user { text-align: left; font-weight: bold; background-color: #f8fafc; mso-number-format:"\\@"; }
           .status-normal { background-color: #dcfce7; color: #15803d; font-weight: bold; }
-          .status-defect { background-color: #fee2e2; color: #dc2626; font-weight: bold; }
+          .status-late { background-color: #ffedd5; color: #c2410c; font-weight: bold; }
+          .status-absent { background-color: #fee2e2; color: #dc2626; font-weight: bold; }
           .status-off { background-color: #f1f5f9; color: #64748b; }
           .status-future { color: #94a3b8; }
           .summary-col { font-weight: bold; background-color: #f8fafc; }
@@ -2230,13 +2235,13 @@ function MonthlyReportView() {
           rowHtml += `<td class="status-off">Dam olish</td>`
         } else if (!firstCheckIn) {
           defectCount++
-          rowHtml += `<td class="status-defect">Kelmagan</td>`
+          rowHtml += `<td class="status-absent">Kelmagan</td>`
         } else if (lateInfo.isLate || earlyInfo.isEarly) {
           defectCount++
           let note = []
           if (lateInfo.isLate) note.push(`Kechikdi (${formatDelayBadge(lateInfo.minutesLate)})`)
           if (earlyInfo.isEarly) note.push(`Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})`)
-          rowHtml += `<td class="status-defect">${note.join(', ')}</td>`
+          rowHtml += `<td class="status-late">${note.join(', ')}</td>`
         } else {
           normalCount++
           const tIn = new Date(firstCheckIn).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -2346,15 +2351,19 @@ function MonthlyReportView() {
           <div className="monthly-legend">
             <div className="legend-item">
               <div className="legend-box normal" />
-              <span>Normal</span>
+              <span>Vaqtida</span>
             </div>
             <div className="legend-item">
-              <div className="legend-box defect" />
-              <span>Kamchilik</span>
+              <div className="legend-box late" />
+              <span>Kech / Erta</span>
+            </div>
+            <div className="legend-item">
+              <div className="legend-box absent" />
+              <span>Kelmagan</span>
             </div>
             <div className="legend-item">
               <div className="legend-box off" />
-              <span>Dam olish / Yo'q</span>
+              <span>Dam olish</span>
             </div>
           </div>
 
@@ -2446,75 +2455,76 @@ function MonthlyReportView() {
                       const lateInfo = checkIsLate(firstCheckIn)
                       const earlyInfo = checkIsEarlyLeave(lastCheckOut)
 
+                      // Status mantiqini to'g'ri ajratamiz:
+                      // absent = kelmagan (red)
+                      // late = kech kelgan yoki erta ketgan (orange)
+                      // normal = vaqtida (green)
                       let status = 'normal'
                       let statusTag = 'OK'
+                      let statusLabel = 'Vaqtida'
 
                       if (d.isFuture) {
                         status = 'future'
                         statusTag = '—'
+                        statusLabel = 'Kelajak'
                       } else if (d.isWeekend && userEventsOnDay.length === 0) {
                         status = 'off'
                         statusTag = 'D'
+                        statusLabel = 'Dam olish'
                       } else if (!firstCheckIn) {
-                        status = 'defect'
+                        // Kelmagan - RED
+                        status = 'absent'
                         statusTag = 'X'
+                        statusLabel = 'Kelmagan'
                       } else if (lateInfo.isLate || earlyInfo.isEarly) {
-                        status = 'defect'
-                        statusTag = lateInfo.isLate ? formatDelayBadge(lateInfo.minutesLate) : formatEarlyBadge(earlyInfo.minutesEarly)
+                        // Kech kelgan yoki erta ketgan - ORANGE
+                        status = 'late'
+                        const parts = []
+                        if (lateInfo.isLate) parts.push(formatDelayBadge(lateInfo.minutesLate))
+                        if (earlyInfo.isEarly) parts.push(formatEarlyBadge(earlyInfo.minutesEarly))
+                        statusTag = parts.join(' ')
+                        statusLabel = [
+                          lateInfo.isLate ? `Kech kirdi (${formatDelayBadge(lateInfo.minutesLate)})` : '',
+                          earlyInfo.isEarly ? `Erta ketdi (${formatEarlyBadge(earlyInfo.minutesEarly)})` : ''
+                        ].filter(Boolean).join(', ')
                       } else {
+                        // Vaqtida - GREEN
                         status = 'normal'
                         statusTag = 'OK'
+                        statusLabel = 'Vaqtida'
                       }
 
                       const timeStr = firstCheckIn
-                        ? new Date(firstCheckIn).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', hour12: false })
+                        ? new Date(firstCheckIn).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit', hour12: false })
                         : null
                       const outTimeStr = lastCheckOut
-                        ? new Date(lastCheckOut).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', hour12: false })
+                        ? new Date(lastCheckOut).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit', hour12: false })
                         : null
 
                       return (
                         <td key={d.dayNumber} className="matrix-td-day">
-                          <div className={`matrix-day-box ${status}`}>
+                          <div
+                            className={`matrix-day-box ${status}`}
+                            onMouseEnter={(e) => {
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              setHoveredCell({
+                                x: rect.left + rect.width / 2,
+                                y: rect.top,
+                                data: {
+                                  userName: user.name || 'Ismsiz',
+                                  dayLabel: `${d.dayNumber}-${MONTH_NAMES[month]}`,
+                                  status,
+                                  statusLabel,
+                                  timeStr,
+                                  outTimeStr,
+                                  lateInfo,
+                                  earlyInfo,
+                                }
+                              })
+                            }}
+                            onMouseLeave={() => setHoveredCell(null)}
+                          >
                             <div>{statusTag}</div>
-
-                            {/* Tooltip on Hover */}
-                            <div className="day-tooltip">
-                              <div className="tooltip-title">
-                                {user.name || 'Ismsiz'} • {d.dayNumber}-{MONTH_NAMES[month]}
-                              </div>
-
-                              <div className="tooltip-row">
-                                <span>Status:</span>
-                                <span className={status === 'normal' ? 'tooltip-row ok' : status === 'defect' ? 'tooltip-row late' : ''}>
-                                  {status === 'normal' ? 'Vaqtida' : status === 'defect' ? 'Kamchilik' : status === 'off' ? 'Dam olish' : 'Kelajak'}
-                                </span>
-                              </div>
-
-                              <div className="tooltip-row">
-                                <span>Kirish vaqti:</span>
-                                <span>{timeStr ? timeStr : 'Qayd etilmagan'}</span>
-                              </div>
-
-                              <div className="tooltip-row">
-                                <span>Chiqish vaqti:</span>
-                                <span>{outTimeStr ? outTimeStr : 'Qayd etilmagan'}</span>
-                              </div>
-
-                              {lateInfo?.isLate && (
-                                <div className="tooltip-row late">
-                                  <span>Kechikish:</span>
-                                  <span>{formatDelayTitle(lateInfo.minutesLate)}</span>
-                                </div>
-                              )}
-
-                              {earlyInfo?.isEarly && (
-                                <div className="tooltip-row early">
-                                  <span>Erta ketish:</span>
-                                  <span>{formatEarlyTitle(earlyInfo.minutesEarly)}</span>
-                                </div>
-                              )}
-                            </div>
                           </div>
                         </td>
                       )
@@ -2526,9 +2536,98 @@ function MonthlyReportView() {
           </tbody>
         </table>
       </div>
+
+      {/* Fixed-position tooltip - scroll containerdan tashqarida, eng yuqori z-index */}
+      {hoveredCell && (
+        <div
+          className="monthly-fixed-tooltip"
+          style={{
+            position: 'fixed',
+            left: hoveredCell.x,
+            top: hoveredCell.y - 8,
+            transform: 'translate(-50%, -100%)',
+            zIndex: 9999,
+            pointerEvents: 'none',
+          }}
+        >
+          <div className="tooltip-title">
+            {hoveredCell.data.userName} • {hoveredCell.data.dayLabel}
+          </div>
+
+          <div className="tooltip-row">
+            <span>Holat:</span>
+            <span className={
+              hoveredCell.data.status === 'normal' ? 'tok-ok' :
+              hoveredCell.data.status === 'late' ? 'tok-late' :
+              hoveredCell.data.status === 'absent' ? 'tok-absent' : ''
+            }>
+              {hoveredCell.data.statusLabel}
+            </span>
+          </div>
+
+          <div className="tooltip-row">
+            <span>Kirish:</span>
+            <span style={{ color: hoveredCell.data.lateInfo?.isLate ? '#fb923c' : '#4ade80' }}>
+              {hoveredCell.data.timeStr
+                ? hoveredCell.data.lateInfo?.isLate
+                  ? `${hoveredCell.data.timeStr} (${formatDelayBadge(hoveredCell.data.lateInfo.minutesLate)} kech)`
+                  : hoveredCell.data.timeStr
+                : 'Qayd etilmagan'
+              }
+            </span>
+          </div>
+
+          <div className="tooltip-row">
+            <span>Chiqish:</span>
+            <span style={{ color: hoveredCell.data.earlyInfo?.isEarly ? '#fb923c' : '#94a3b8' }}>
+              {hoveredCell.data.outTimeStr
+                ? hoveredCell.data.earlyInfo?.isEarly
+                  ? `${hoveredCell.data.outTimeStr} (${formatEarlyBadge(hoveredCell.data.earlyInfo.minutesEarly)} erta)`
+                  : hoveredCell.data.outTimeStr
+                : 'Qayd etilmagan'
+              }
+            </span>
+          </div>
+
+          {hoveredCell.data.lateInfo?.isLate && (
+            <div style={{ color: '#fb923c', fontWeight: 600, marginTop: 4, borderTop: '1px solid rgba(251,146,60,0.25)', paddingTop: 4, fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span>⏱ Kechikish:</span>
+              <span>{formatDelayTitle(hoveredCell.data.lateInfo.minutesLate)}</span>
+            </div>
+          )}
+
+          {hoveredCell.data.earlyInfo?.isEarly && (
+            <div style={{ color: '#fb923c', fontWeight: 600, marginTop: 4, borderTop: '1px solid rgba(251,146,60,0.25)', paddingTop: 4, fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span>🚪 Erta ketish:</span>
+              <span>{formatEarlyTitle(hoveredCell.data.earlyInfo.minutesEarly)}</span>
+            </div>
+          )}
+
+          {hoveredCell.data.status === 'absent' && (
+            <div style={{ color: '#f87171', fontWeight: 600, marginTop: 4, borderTop: '1px solid rgba(239,68,68,0.2)', paddingTop: 4, fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span>❌ Kelmagan</span>
+              <span>Ish kuni qayd etilmagan</span>
+            </div>
+          )}
+
+          {/* Arrow */}
+          <div style={{
+            position: 'absolute',
+            top: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 0,
+            height: 0,
+            borderLeft: '6px solid transparent',
+            borderRight: '6px solid transparent',
+            borderTop: '6px solid #0f172a',
+          }} />
+        </div>
+      )}
     </div>
   )
 }
+
 
 // ── Main App ───────────────────────────────────────────────────────
 export default function App() {

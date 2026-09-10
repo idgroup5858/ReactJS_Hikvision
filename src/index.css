@@ -1406,6 +1406,17 @@ html, body, #root {
   box-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
 }
 
+.legend-box.late {
+  background: #f97316;
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.4);
+}
+
+.legend-box.absent {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
+/* Keep .defect for backward compat */
 .legend-box.defect {
   background: #ef4444;
   box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
@@ -1703,6 +1714,8 @@ html, body, #root {
   border-right: 1px solid rgba(255, 255, 255, 0.05);
   border-bottom: 1px solid var(--border);
   position: relative;
+  /* tooltip z-index uchun overflow visible bo'lishi kerak */
+  overflow: visible;
 }
 
 .matrix-day-box {
@@ -1757,9 +1770,77 @@ html, body, #root {
   cursor: default;
 }
 
+/* === ORANGE: kech kelgan yoki erta ketgan === */
+.matrix-day-box.late {
+  background: rgba(249, 115, 22, 0.18);
+  border: 1px solid rgba(249, 115, 22, 0.45);
+  color: #fb923c;
+}
+
+.matrix-day-box.late:hover {
+  background: rgba(249, 115, 22, 0.35);
+  border-color: #f97316;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.45);
+}
+
+/* === RED: kelmagan === */
+.matrix-day-box.absent {
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #f87171;
+}
+
+.matrix-day-box.absent:hover {
+  background: rgba(239, 68, 68, 0.35);
+  border-color: #ef4444;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.45);
+}
+
+/* backward compat - eski defect klassi */
+.matrix-day-box.defect {
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+}
+
+.matrix-day-box.defect:hover {
+  background: rgba(239, 68, 68, 0.35);
+  border-color: #ef4444;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+}
+
+/* Tooltip hover - z-index eng baland qilish */
 .matrix-day-box:hover .day-tooltip {
   opacity: 1;
   visibility: visible;
 }
 
+/* Tooltip z-index tuzatildi - 9999 */
+.matrix-td-day .day-tooltip {
+  z-index: 9999 !important;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 220px;
+  width: max-content;
+  max-width: 280px;
+}
 
+/* Tooltip color classes */
+.tok-ok { color: #4ade80; font-weight: 600; }
+.tok-late { color: #fb923c; font-weight: 600; }
+.tok-absent { color: #f87171; font-weight: 600; }
+
+/* Fixed-position tooltip (scroll containerdan tashqarida render bo'ladi) */
+.monthly-fixed-tooltip {
+  background: #0b1a28;
+  border: 1px solid rgba(0, 194, 168, 0.4);
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0,194,168,0.12);
+  min-width: 220px;
+  max-width: 300px;
+  width: max-content;
+  animation: fadeIn 0.12s ease;
+}
